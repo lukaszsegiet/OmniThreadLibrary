@@ -1,4 +1,29 @@
-3.07.5: <<unreleased>>
+3.07.6: <<unreleased>>
+
+- Breaking changes:
+  - TOmniValueInt32/64.Add/.Subtract were returning *old* value. Fixed now, 
+    but this change may break your code.
+  - TInterlockedEx.Add was returning *old* value for Delphi 2007 and 2009. Fixed now,
+    but this change may break your code.
+- New features:
+  - Implemented TOmniValue.LogValue.
+  - Implemented TOmniBlockingCollection.FromArray<T>, .FromRange<T>, 
+    and .AddRange<T>. [issue #76]
+  - Added timeout parameter to TOmniMREW.TryEnterReadLock and 
+    TOmniMREW.TryExitReadLock.
+- Bug fixed:
+  -  Fixed race condition in TOmniBaseBoundedQueue.RemoveLink which could cause
+     TOmniBaseBoundedQueue.Enqueue to return False when queue was empty. 
+  - ThreadData is destroyed in the worker thread and not in the thread pool
+    management thread.
+  - Reduced hints&warnings. [issue #110]
+  - [Thomas Mueller] Fixed Delphi 2007 packages.
+  - Fixed problems with TOmniAlignedInt32 and pre-Seattle compilers.
+  - First parameter in TOmniAlignedInt32 Subtract operator marked as `const` to fix
+    problems with all Delphi compilers.
+  - Removed hints and warnings in all compilers.
+
+3.07.5: 2017-02-28
 
 - General improvements:
   - Reduced number of times NameThreadForDebugging is called when threadpool
@@ -35,9 +60,10 @@
   - Cancel(taskID) will signal task's cancellation token before calling task's Terminate
     method. CancelAll will signal cancellation token for all running tasks before calling
     their Terminate method.
-    Old behaviour (no CancellationToken.Signal before Terminate) can be achieved by
-    calling overloaded version of the functions accepting the `signalCancellationToken`
-    parameter or by setting IOmniThreadPool.Options to [tpoPreventCancellationTokenOnCancel].
+    Old behaviour (no CancellationToken.Signal before Terminate) can be 
+    achieved by calling overloaded version of the functions accepting the 
+    `signalCancellationToken` parameter or by setting IOmniThreadPool.Options 
+    to [tpoPreventCancellationTokenOnCancel].
 - New features:
   - Added OnStop overload that accepts 'reference to procedure (const task: IOmniTask)'
     to Parallel.Join and Parallel.ParallelTask.

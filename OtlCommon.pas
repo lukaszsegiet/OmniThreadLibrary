@@ -3,7 +3,7 @@
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2017, Primoz Gabrijelcic
+///Copyright (c) 2018, Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -35,10 +35,15 @@
 ///     Blog            : http://thedelphigeek.com
 ///   Contributors      : GJ, Lee_Nover, scarre, Sean B. Durkin
 ///   Creation date     : 2008-06-12
-///   Last modification : 2017-07-26
-///   Version           : 1.48
+///   Last modification : 2018-04-13
+///   Version           : 1.50
 ///</para><para>
 ///   History:
+///     1.50: 2018-04-13
+///       - Implemented TOmniValue.LogValue, useful for debug logging.
+///     1.49: 2018-03-12
+///       - Added TOmniValue.FromRecordUnsafe<T> which works same as FromRecord<T> but
+///         doesn't enforce a 'record' constraint on T.
 ///     1.48: 2017-07-26
 ///       - TOmniMessageID can now hold TProc<integer>.
 ///     1.47: 2017-02-03
@@ -319,7 +324,7 @@ type
            , ovtWideString, ovtAnsiString
 {$ENDIF});
 
-  TOmniValue = packed record // 13 bytes in 32-bit, 17 bytes in 64-bits
+  TOmniValue = packed record // 13 bytes in 32-bit, 17 bytes in 64-bit
   private
     ovData: int64;
     ovIntf: IInterface;
@@ -428,6 +433,7 @@ type
     function  IsRecord: boolean; inline;
     function  IsString: boolean; inline;
     function  IsVariant: boolean; inline;
+    function  LogValue: string;
     class function Null: TOmniValue; static;
     function  RawData: PInt64; inline;
     procedure RawZero; inline;
@@ -514,6 +520,7 @@ type
     class function CastFrom<T>(const value: T): TOmniValue; static;
     function  CastTo<T>: T;
     class function FromRecord<T: record>(const value: T): TOmniValue; static;
+    class function FromRecordUnsafe<T>(const value: T): TOmniValue; static;
     function  ToRecord<T>: T;
     class function Wrap<T>(const value: T): TOmniValue; static;
     function  Unwrap<T>: T; //Use this form to call: omnivalue.Unwrap<T>()
@@ -1051,17 +1058,17 @@ type
     function  Increment: integer; overload; inline;
     function  Increment(value: integer): integer; overload; inline;
     function  Subtract(value: integer): integer; inline;
-    class operator Add(const ai: TOmniAlignedInt32; i: integer): cardinal; inline;
-    class operator Equal(const ai: TOmniAlignedInt32; i: integer): boolean; inline;
-    class operator GreaterThan(const ai: TOmniAlignedInt32; i: integer): boolean; inline;
-    class operator GreaterThanOrEqual(const ai: TOmniAlignedInt32; i: integer): boolean; inline;
+    class operator Add(const ai: TOmniAlignedInt32; i: integer): cardinal; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
+    class operator Equal(const ai: TOmniAlignedInt32; i: integer): boolean; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
+    class operator GreaterThan(const ai: TOmniAlignedInt32; i: integer): boolean; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
+    class operator GreaterThanOrEqual(const ai: TOmniAlignedInt32; i: integer): boolean; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
     class operator Implicit(const ai: TOmniAlignedInt32): integer; inline;
     class operator Implicit(const ai: TOmniAlignedInt32): cardinal; inline;
     class operator Implicit(const ai: TOmniAlignedInt32): PInteger; inline;
-    class operator LessThan(const ai: TOmniAlignedInt32; i: integer): boolean; inline;
-    class operator LessThanOrEqual(const ai: TOmniAlignedInt32; i: integer): boolean; inline;
-    class operator NotEqual(const ai: TOmniAlignedInt32; i: integer): boolean; inline;
-    class operator Subtract(ai: TOmniAlignedInt32; i: integer): cardinal; inline;
+    class operator LessThan(const ai: TOmniAlignedInt32; i: integer): boolean; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
+    class operator LessThanOrEqual(const ai: TOmniAlignedInt32; i: integer): boolean; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
+    class operator NotEqual(const ai: TOmniAlignedInt32; i: integer): boolean; {$IFDEF OTL_CanInlineOperators}inline;{$ENDIF}
+    class operator Subtract(const ai: TOmniAlignedInt32; i: integer): cardinal;
     property Value: integer read GetValue write SetValue;
   end; { TOmniAlignedInt32 }
 
@@ -2455,6 +2462,11 @@ begin
   Result.SetAsRecord(CreateAutoDestroyObject(TOmniRecordWrapper<T>.Create(value)));
 end; { TOmniValue.FromRecord<T> }
 
+class function TOmniValue.FromRecordUnsafe<T>(const value: T): TOmniValue;
+begin
+  Result.SetAsRecord(CreateAutoDestroyObject(TOmniRecordWrapper<T>.Create(value)));
+end; { TOmniValue.FromRecordUnsafe<T> }
+
 {$IF CompilerVersion > 20}
 function TOmniValue.ToObject<T>: T;
 begin
@@ -2929,6 +2941,38 @@ begin
   Result := (ovType = ovtWideString);
 end; { TOmniValue.IsWideString }
 {$ENDIF}
+
+function TOmniValue.LogValue: string;
+const
+  CBoolStr: array [boolean] of string = ('F', 'T');
+begin
+  try
+    case DataType of
+      ovtNull:        Result := '[0]';
+      ovtBoolean:     Result := '[B]' + CBoolStr[AsBoolean];
+      ovtInteger:     Result := '[4]' + AsString;
+      ovtInt64:       Result := '[8]' + AsString;
+      ovtDouble:      Result := '[D]' + AsString;
+      ovtObject:      Result := '[O]' + AsObject.ClassName;
+      ovtPointer:     Result := '[P]' + Format('%p', [AsPointer]);
+      ovtDateTime:    Result := '[T]' + FormatDateTime('yyyymmddhhnnsszzz', AsDateTime);
+      ovtException:   Result := '[E]' + AsException.ClassName;
+      ovtExtended:    Result := '[X]' + AsString;
+      ovtString:      Result := '[S]' + AsString;
+      ovtInterface:   Result := '[I]';
+      ovtVariant:     Result := '[V]' + AsString;
+      ovtArray:       Result := '[A]' + IntToStr(AsArray.Count);
+      ovtRecord:      Result := '[R]';
+      ovtOwnedObject: Result := '[o]' + AsObject.ClassName;
+    {$IFDEF MSWINDOWS}
+      ovtWideString:  Result := '[W]' + AsString;
+      ovtAnsiString:  Result := '[N]' + AsString;
+    {$ENDIF MSWINDOWS}
+    end;
+  except
+    Result := '!' + IntToStr(Ord(DataType));
+  end;
+end; { TOmniValue.LogValue }
 
 class function TOmniValue.Null: TOmniValue;
 begin
@@ -4472,7 +4516,7 @@ end; { NextOid }
 function TOmniAlignedInt32.Subtract(value: integer): integer; //inline
 begin
   {$IFDEF MSWINDOWS}
-  Result := InterlockedExchangeAdd(Addr^, -value);
+  Result := InterlockedExchangeAdd(Addr^, -value) - value;
   {$ELSE}
   Result := TInterlocked.Add(Addr^, -value);
   {$ENDIF}
@@ -4486,7 +4530,7 @@ end; { TOmniAlignedInt32.Initialize }
 function TOmniAlignedInt32.Add(value: integer): integer;
 begin
   {$IFDEF MSWINDOWS}
-  Result := InterlockedExchangeAdd(Addr^, value);
+  Result := InterlockedExchangeAdd(Addr^, value) + value;
   {$ELSE}
   Result := TInterlocked.Add(Addr^, value);
   {$ENDIF}
@@ -4519,7 +4563,7 @@ end; { TOmniAlignedInt32.Decrement }
 function TOmniAlignedInt32.Decrement(value: integer): integer;
 begin
   {$IFDEF MSWINDOWS}
-  Result := Subtract(value) - value;
+  Result := Subtract(value);
   {$ELSE}
   Result := TInterlocked.Add(Addr^, -value);
   {$ENDIF}
@@ -4542,7 +4586,7 @@ end; { TOmniAlignedInt32.Increment }
 function TOmniAlignedInt32.Increment(value: integer): integer;
 begin
   {$IFDEF MSWINDOWS}
-  Result := Add(value) + value;
+  Result := Add(value);
   {$ELSE}
   Result := TInterlocked.Add(Addr^, value);
   {$ENDIF}
@@ -4605,7 +4649,7 @@ begin
   Result := (ai.Value <> i);
 end; { TOmniAlignedInt32.NotEqual }
 
-class operator TOmniAlignedInt32.Subtract(ai: TOmniAlignedInt32; i: integer): cardinal;
+class operator TOmniAlignedInt32.Subtract(const ai: TOmniAlignedInt32; i: integer): cardinal;
 begin
   Result := cardinal(int64(ai.Value) - i);
 end; { TOmniAlignedInt32.Subtract }
@@ -4615,7 +4659,7 @@ end; { TOmniAlignedInt32.Subtract }
 function TOmniAlignedInt64.Subtract(value: int64): int64; //inline
 begin
   {$IFDEF MSWINDOWS}
-  Result := DSiInterlockedExchangeAdd64(Addr^, -value);
+  Result := DSiInterlockedExchangeAdd64(Addr^, -value) - value;
   {$ELSE}
   Result := TInterlocked.Add(Addr^, -value);
   {$ENDIF}
@@ -4630,7 +4674,7 @@ end; { TOmniAlignedInt64.Initialize }
 function TOmniAlignedInt64.Add(value: int64): int64;
 begin
   {$IFDEF MSWINDOWS}
-  Result := DSiInterlockedExchangeAdd64(Addr^, value);
+  Result := DSiInterlockedExchangeAdd64(Addr^, value) + value;
   {$ELSE}
   Result := TInterlocked.Add(Addr^, value);
   {$ENDIF}
@@ -4663,7 +4707,7 @@ end; { TOmniAlignedInt64.Decrement }
 function TOmniAlignedInt64.Decrement(value: int64): int64;
 begin
   {$IFDEF MSWINDOWS}
-  Result := Subtract(value) - value;
+  Result := Subtract(value);
   {$ELSE}
   Result := TInterlocked.Add(Addr^, -value);
   {$ENDIF}
@@ -4686,7 +4730,7 @@ end; { TOmniAlignedInt64.Increment }
 function TOmniAlignedInt64.Increment(value: int64): int64;
 begin
   {$IFDEF MSWINDOWS}
-  Result := Add(value) + value;
+  Result := Add(value);
   {$ELSE}
   Result := TInterlocked.Add(Addr^, value);
   {$ENDIF}

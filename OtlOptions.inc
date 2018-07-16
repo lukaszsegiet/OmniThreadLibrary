@@ -97,9 +97,10 @@
 
 {$IF CompilerVersion >= 24} //DXE3
   {$DEFINE OTL_LongGetMethodInfo}
+  {$DEFINE OTL_NameThreadHasStringParameter}
 {$IFEND}
 
-{$IF CompilerVersion >= 26} //DXE5
+{$IF CompilerVersion >= 25} //DXE4
   {$DEFINE OTL_StrPasInAnsiStrings}
 {$IFEND}
 
@@ -109,6 +110,10 @@
 
 {$IF CompilerVersion >= 29} //DXE8
   {$DEFINE OTL_MobileSupport}
+{$IFEND}
+
+{$IF CompilerVersion >= 30} //Seattle
+  {$DEFINE OTL_CanInlineOperators}
 {$IFEND}
 
 {$IFNDEF MSWINDOWS}
