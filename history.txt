@@ -1,29 +1,36 @@
-3.07.6: <<unreleased>>
+3.07.7: <<unreleased>>
 
-- Breaking changes:
-  - TOmniValueInt32/64.Add/.Subtract were returning *old* value. Fixed now, 
-    but this change may break your code.
-  - TInterlockedEx.Add was returning *old* value for Delphi 2007 and 2009. Fixed now,
-    but this change may break your code.
+- New features:
+  - [HHasenack] On XE3 and above, TOmniValue.CastTo<T> supports casting
+    to an interface.
+  - [HHasenack] Implemented Parallel.ForEach(IEnumerator<T>) and
+    Parallel.ForEach(IEnumerable<T>).
+
+- Bug fixes:
+  - If additional wait objects registered with RegisterWaitObject were
+    constantly signalled, timers were never called.
+  - OtlParallel threads were incorrectly scheduled to the main pool 
+    instead of GlobalParallelPool unless IOmniTaskConfig.ThreadPool
+    was used. (introduced in 3.07.6)
+  - Using Parallel.Join, .For, and .ForEach with .OnStopInvoke failed 
+    with access violation if Join/For/ForEach was not executed with .NoWait.
+
+3.07.6: 2018-11-26
+
 - New features:
   - Implemented TOmniValue.LogValue.
   - Implemented TOmniBlockingCollection.FromArray<T>, .FromRange<T>, 
     and .AddRange<T>. [issue #76]
   - Added timeout parameter to TOmniMREW.TryEnterReadLock and 
     TOmniMREW.TryExitReadLock.
-- Bug fixed:
+- Bug fixes:
   - Fixed race condition in TOmniBaseBoundedQueue.RemoveLink which could cause
-    TOmniBaseBoundedQueue.Enqueue to return False when queue was empty. 
+    TOmniBaseBoundedQueue.Enqueue to return False when queue was empty.
+  - Fixed race condition between TOmniResourceCount.[Try]Allocate and
+    TOmniResourceCount.Release. [tnx to Stephen Melnyk]
   - ThreadData is destroyed in the worker thread and not in the thread pool
     management thread.
   - Reduced hints&warnings. [issue #110]
-  - [Thomas Mueller] Fixed Delphi 2007 packages.
-  - Fixed problems with TOmniAlignedInt32 and pre-Seattle compilers.
-  - First parameter in TOmniAlignedInt32 Subtract operator marked as `const` to fix
-    problems with all Delphi compilers.
-  - [MkhPavel] Fixed API prototypes for 64-bit.
-  - Removed hints and warnings in all compilers.
-  - Fixed test 00_Beep.
 
 3.07.5: 2017-02-28
 
