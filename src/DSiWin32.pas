@@ -8,10 +8,19 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2019-05-08
-   Version           : 1.105b
+   Last modification : 2020-04-03
+   Version           : 2.0
 </pre>*)(*
    History:
+     2.0: 2020-04-03
+       - Extracted all code depending on Vcl.Graphics into unit DSiWin32.VCL.
+     1.108: 2020-04-03
+       - Compiles without referencing Vcl.Graphics if NoVCL symbol is defined.
+     1.107: 2020-01-21
+       - Better process termination of timed-out processes in DSiExecuteAndCapture.
+     1.106: 2019-12-13
+       - DSiEnumFiles* family filters out non-directories when only directories are
+         requested (attr = faDirectory).
      1.105b: 2019-05-08
        - Compiles with Delphi 2007.
      1.105a: 2019-05-06
@@ -589,7 +598,6 @@ uses
   {$IFDEF DSiScopedUnitNames}Winapi.ShlObj{$ELSE}ShlObj{$ENDIF},
   {$IFDEF DSiScopedUnitNames}System.Classes{$ELSE}Classes{$ENDIF},
   {$IFDEF DSiScopedUnitNames}System.Contnrs{$ELSE}Contnrs{$ENDIF},
-  {$IFDEF DSiScopedUnitNames}Vcl.Graphics{$ELSE}Graphics{$ENDIF},
   {$IFDEF DSiScopedUnitNames}System.Win.Registry{$ELSE}Registry{$ENDIF}
   {$IFDEF DSiUseAnsiStrings}, System.AnsiStrings{$ENDIF}
   {$IFDEF DSiHasGenerics}, {$IFDEF DSiScopedUnitNames}System.Generics.Collections{$ELSE}Generics.Collections{$ENDIF}{$ENDIF}
@@ -1189,7 +1197,6 @@ type
     function  ReadBinary(const name: string; dataStream: TStream): boolean; overload;
     function  ReadBool(const name: string; defval: boolean): boolean;
     function  ReadDate(const name: string; defval: TDateTime): TDateTime;
-    function  ReadFont(const name: string; font: TFont): boolean;
     function  ReadInt64(const name: string; defval: int64): int64;
     function  ReadInteger(const name: string; defval: integer): integer;
     function  ReadString(const name, defval: string): string;
@@ -1197,7 +1204,6 @@ type
     function  ReadVariant(const name: string; defval: variant): variant;
     procedure WriteBinary(const name: string; data: RawByteString); overload;
     procedure WriteBinary(const name: string; data: TStream); overload;
-    procedure WriteFont(const name: string; font: TFont);
     procedure WriteInt64(const name: string; value: int64);
     procedure WriteStrings(const name: string; strings: TStrings);
     procedure WriteVariant(const name: string; value: variant);
@@ -1877,7 +1883,6 @@ type
   function  DSiGetWindowsFolder: string;
   function  DSiGetWindowsVersion: TDSiWindowsVersion;
   function  DSiHasRoamingProfile(var userHasRoamingProfile: boolean): boolean;
-  function  DSiInitFontToSystemDefault(aFont: TFont; aElement: TDSiUIElement): boolean;
   function  DSiIsAdmin: boolean;
   function  DSiIsAdminLoggedOn: boolean;
   function  DSiIsCodeSigned(const exeFileName: string; var certName: AnsiString): boolean;
@@ -2823,33 +2828,6 @@ type
     except Result := defval; end;
   end; { TDSiRegistry.ReadDate }
 
-  {:Reads TFont from the registry.
-    @author  gabr
-    @since   2002-11-25
-  }
-  function TDSiRegistry.ReadFont(const name: string; font: TFont): boolean;
-  var
-    istyle: integer;
-    fstyle: TFontStyles;
-  begin
-    Result := false;
-    if GetDataSize(name) > 0 then begin
-      font.Charset := ReadInteger(name+'_charset', font.Charset);
-      font.Color   := ReadInteger(name+'_color', font.Color);
-      font.Height  := ReadInteger(name+'_height', font.Height);
-      font.Name    := ReadString(name, font.Name);
-      font.Pitch   := TFontPitch(ReadInteger(name+'_pitch', Ord(font.Pitch)));
-      font.Size    := ReadInteger(name+'_size', font.Size);
-      fstyle := font.Style;
-      istyle := 0;
-      Move(fstyle, istyle, SizeOf(TFontStyles));
-      istyle := ReadInteger(name+'_style', istyle);
-      Move(istyle, fstyle, SizeOf(TFontStyles));
-      font.Style := fstyle;
-      Result := true;
-    end;
-  end; { TDSiRegistry.ReadFont }
-
   {:Reads integer from the registry returning default value if name doesn't
     exist in the open key.
     @author  gabr
@@ -3019,27 +2997,6 @@ type
       else raise Exception.Create('TDSiRegistry.WriteVariant: Invalid value type!');
     end;
   end; { TDSiRegistry.WriteVariant }
-
-  {:Writes TFont into the registry.
-    @author  gabr
-    @since   2002-11-25
-  }
-  procedure TDSiRegistry.WriteFont(const name: string; font: TFont);
-  var
-    istyle: integer;
-    fstyle: TFontStyles;
-  begin
-    WriteInteger(name+'_charset', font.Charset);
-    WriteInteger(name+'_color', font.Color);
-    WriteInteger(name+'_height', font.Height);
-    WriteString(name, font.Name);
-    WriteInteger(name+'_pitch', Ord(font.Pitch));
-    WriteInteger(name+'_size', font.Size);
-    fstyle := font.Style;
-    istyle := 0;
-    Move(fstyle, istyle, SizeOf(TFontStyles));
-    WriteInteger(name+'_style', istyle);
-  end; { TDSiRegistry.WriteFont }
 
   {:Writes TStrings into a MULTI_SZ value.
     @author  Colin Wilson, borland.public.delphi.vcl.components.using
@@ -3703,6 +3660,9 @@ type
       repeat
         // don't filter anything
         //if (S.Attr AND attr <> 0) or (S.Attr AND attr = attr) then begin
+        if (attr <> faDirectory)
+           or ((attr = faDirectory) and (S.Attr AND attr = attr))
+        then begin
           if assigned(enumCallback) then
             enumCallback(folder, S, false, stopEnum);
           if assigned(fileList) then
@@ -3713,7 +3673,7 @@ type
           if assigned(fileObjectList) then
             fileObjectList.Add(TDSiFileInfo.Create(folder, S, currentDepth));
           Inc(totalFiles);
-        //end;
+        end;
         err := FindNext(S);
       until (err <> 0) or stopEnum;
     finally FindClose(S); end;
@@ -5267,8 +5227,14 @@ type
         if TerminateProcess(processInfo.hProcess, exitCode) then
           WaitForSingleObject(processInfo.hProcess, INFINITE);
       end
-      else
+      else begin
         GetExitCodeProcess(processInfo.hProcess, exitCode);
+        if exitCode = STILL_ACTIVE then
+          if TerminateProcess(processInfo.hProcess, exitCode) then begin
+            WaitForSingleObject(processInfo.hProcess, INFINITE);
+            GetExitCodeProcess(processInfo.hProcess, exitCode);
+          end;
+      end;
       CloseHandle(processInfo.hProcess);
       CloseHandle(processInfo.hThread);
       CloseHandle(readPipe);
@@ -7464,38 +7430,6 @@ var
                                       'CentralProfile', '', HKEY_LOCAL_MACHINE));
     Result := true;
   end; { DSiHasRoamingProfile }
-
-  {:Initializes font to the metrics of a specific GUI element.
-    @author  aoven
-    @since   2007-11-13
-  }
-  function DSiInitFontToSystemDefault(aFont: TFont; aElement: TDSiUIElement): boolean;
-  var
-    NCM: TNonClientMetrics;
-    PLF: PLogFont;
-  begin
-    Result := false;
-    NCM.cbSize := {$IFDEF Unicode}
-      {$IF CompilerVersion = 20} //D2009
-        SizeOf(TNonClientMetrics)
-      {$ELSE}
-        TNonClientMetrics.SizeOf
-      {$IFEND}
-    {$ELSE}
-      SizeOf(TNonClientMetrics)
-    {$ENDIF};
-    if SystemParametersInfo(SPI_GETNONCLIENTMETRICS, 0, @NCM, 0) then begin
-      case aElement of
-        ueMenu:          PLF := @NCM.lfMenuFont;
-        ueMessage:       PLF := @NCM.lfMessageFont;
-        ueWindowCaption: PLF := @NCM.lfCaptionFont;
-        ueStatus:        PLF := @NCM.lfStatusFont;
-        else raise Exception.Create('Unexpected GUI element');
-      end;
-      aFont.Handle := CreateFontIndirect(PLF^);
-      Result := true;
-    end;
-  end; { DSiInitFontToSystemDefault }
 
   {:Returns True if the application is running with admin privileges.
     Always returns True on Windows 95/98.
