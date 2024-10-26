@@ -4,7 +4,7 @@
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2019 Primoz Gabrijelcic
+///Copyright (c) 2022 Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -30,16 +30,23 @@
 ///</license>
 ///<remarks><para>
 ///   Home              : http://www.omnithreadlibrary.com
-///   Support           : https://plus.google.com/communities/112307748950248514961
+///   Support           : https://en.delphipraxis.net/forum/32-omnithreadlibrary/
 ///   Author            : Primoz Gabrijelcic
 ///     E-Mail          : primoz@gabrijelcic.org
 ///     Blog            : http://thedelphigeek.com
 ///   Contributors      : Sean B. Durkin, HHasenack
 ///   Creation date     : 2010-01-08
-///   Last modification : 2019-01-11
-///   Version           : 1.53b
+///   Last modification : 2022-05-11
+///   Version           : 1.55
 ///</para><para>
 ///   History:
+///     1.55: 2022-05-11
+///       - Optional thread name can be passed to Parallel.TimedTask.
+///     1.54a: 2022-02-17
+///       - Enforce minimum number of execution tasks = 1.
+///     1.54: 2020-12-21
+///       - [HHasenack] Added Cancel and IsCancelled to IOmniParallelTask.
+///       - Implemented IOmniParallelJoin.Terminate and IOmniParallelTask.Terminate.
 ///     1.53b: 2019-01-11
 ///       - Using Parallel.Join.OnStopInvoke failed with access violation if Join
 ///         was not executed with .NoWait.
@@ -1054,6 +1061,7 @@ type
     function  Task(const task: TProc): IOmniParallelJoin; overload;
     function  Task(const task: TOmniJoinDelegate): IOmniParallelJoin; overload;
     function  TaskConfig(const config: IOmniTaskConfig): IOmniParallelJoin;
+    function  Terminate(maxWait_ms: cardinal = INFINITE): boolean; //will kill thread after timeout
     function  WaitFor(timeout_ms: cardinal): boolean;
   end; { IOmniParallelJoin }
 
@@ -1091,16 +1099,19 @@ type
     function  Task(const aTask: TOmniJoinDelegate): IOmniParallelJoin; overload;
     function  Task(const aTask: TProc): IOmniParallelJoin; overload;
     function  TaskConfig(const config: IOmniTaskConfig): IOmniParallelJoin;
+    function  Terminate(timeout_ms: cardinal = INFINITE): boolean;
     function  WaitFor(timeout_ms: cardinal): boolean;
   end; { TOmniParallelJoin }
 
   TOmniParallelTaskDelegate = TOmniTaskDelegate;
 
   IOmniParallelTask = interface
+    function  Cancel:IOmniParallelTask;
     function  DetachException: Exception;
     function  Execute(const aTask: TProc): IOmniParallelTask; overload;
     function  Execute(const aTask: TOmniParallelTaskDelegate): IOmniParallelTask; overload;
     function  FatalException: Exception;
+    function  IsCancelled: boolean;
     function  IsExceptional: boolean;
     function  NoWait: IOmniParallelTask;
     function  NumTasks(numTasks: integer): IOmniParallelTask;
@@ -1108,6 +1119,7 @@ type
     function  OnStop(const stopCode: TOmniTaskStopDelegate): IOmniParallelTask; overload;
     function  OnStopInvoke(const stopCode: TProc): IOmniParallelTask;
     function  TaskConfig(const config: IOmniTaskConfig): IOmniParallelTask;
+    function  Terminate(maxWait_ms: cardinal = INFINITE): boolean; //will kill thread after timeout
     function  WaitFor(timeout_ms: cardinal): boolean;
   end; { IOmniParallelTask }
 
@@ -1354,7 +1366,7 @@ type
 
   // TimedTask
     ///	<summary>Creates a Timed task.</summary>
-    class function TimedTask: IOmniTimedTask;
+    class function TimedTask(const threadName: string = ''): IOmniTimedTask;
 
   // Map
     {$IFDEF OTL_HasArrayOfT}
@@ -1544,10 +1556,12 @@ type
     optNumTasks: integer;
   public
     constructor Create;
+    function  Cancel:IOmniParallelTask; inline;
     function  DetachException: Exception; inline;
     function  Execute(const aTask: TProc): IOmniParallelTask; overload;
     function  Execute(const aTask: TOmniParallelTaskDelegate): IOmniParallelTask; overload;
     function  FatalException: Exception; inline;
+    function  IsCancelled: boolean; inline;
     function  IsExceptional: boolean; inline;
     function  NoWait: IOmniParallelTask;
     function  NumTasks(numTasks: integer): IOmniParallelTask;
@@ -1555,8 +1569,9 @@ type
     function  OnStop(const stopCode: TOmniTaskStopDelegate): IOmniParallelTask; overload;
     function  OnStopInvoke(const stopCode: TProc): IOmniParallelTask;
     function  TaskConfig(const config: IOmniTaskConfig): IOmniParallelTask;
+    function  Terminate(timeout_ms: cardinal = INFINITE): boolean; //will kill thread after timeout
     function  WaitFor(timeout_ms: cardinal): boolean;
-  end; { IOmniParallelTask }
+  end; { TOmniParallelTask }
 
   TOmniTaskConfigTerminated = record
     Event : TOmniTaskTerminatedEvent;
@@ -1642,7 +1657,7 @@ type
     procedure SetActive(const value: boolean);
     procedure SetInterval(const value: integer);
   public
-    constructor Create;
+    constructor Create(const threadName: string = '');
     destructor  Destroy; override;
     function  Every(interval_ms: integer): IOmniTimedTask;
     function  Execute(const aTask: TProc): IOmniTimedTask; overload;
@@ -1651,8 +1666,8 @@ type
     procedure Start; inline;
     procedure Stop; inline;
     function  TaskConfig(const config: IOmniTaskConfig): IOmniTimedTask; inline;
-    function  Terminate(maxWait_ms: cardinal): boolean; inline;
-    function  WaitFor(maxWait_ms: cardinal): boolean; inline;
+    function  Terminate(timeout_ms: cardinal): boolean; inline;
+    function  WaitFor(timeout_ms: cardinal): boolean; inline;
     property Active: boolean read GetActive write SetActive;
     property Interval: integer read GetInterval write SetInterval;
   end; { TOmniTimedTask }
@@ -1782,8 +1797,8 @@ type
     procedure Schedule(const workItem: IOmniWorkItem; const workItemConfig: IOmniWorkItemConfig = nil);
     function  StopOn(const token: IOmniCancellationToken): IOmniBackgroundWorker;
     function  TaskConfig(const config: IOmniTaskConfig): IOmniBackgroundWorker;
-    function  Terminate(maxWait_ms: cardinal): boolean;
-    function  WaitFor(maxWait_ms: cardinal): boolean;
+    function  Terminate(timeout_ms: cardinal): boolean;
+    function  WaitFor(timeout_ms: cardinal): boolean;
   end; { TOmniBackgroundWorker}
 
   TOmniAwait = class(TInterfacedObject, IOmniAwait)
@@ -2027,6 +2042,9 @@ end; { TOmniParallelJoin.FatalException }
 
 function TOmniParallelJoin.InternalWaitFor(timeout_ms: cardinal): boolean;
 begin
+  if not assigned(FCountStopped) then
+    raise Exception.Create('Task was not started');
+
   // Blocks until FCountStopped value is zero.
   {$IFDEF MSWINDOWS}
   Result := WaitForSingleObject(FCountStopped.Handle, timeout_ms) = WAIT_OBJECT_0;
@@ -2058,6 +2076,8 @@ begin
     FNumTasks := numTasks
   else
     FNumTasks := Environment.Process.Affinity.Count + numTasks;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
   Result := Self;
 end; { TOmniParallelJoin.NumTasks }
 
@@ -2113,6 +2133,17 @@ begin
   FTaskConfig := config;
   Result := Self;
 end; { TOmniParallelJoin.TaskConfig }
+
+function TOmniParallelJoin.Terminate(timeout_ms: cardinal = INFINITE): boolean;
+var
+  task: IOmniJoinState;
+begin
+  Result := WaitFor(timeout_ms);
+  if not Result then
+    for task in FJoinStates do
+      if not task.Task.Stopped then
+        (task as IOmniJoinStateEx).TaskControl.Terminate(0);
+end; { TOmniParallelJoin.Terminate }
 
 function TOmniParallelJoin.WaitFor(timeout_ms: cardinal): boolean;
 var
@@ -2402,8 +2433,8 @@ begin
   Result.Stages(stages);
 end; { Parallel.Pipeline }
 
-class function Parallel.Pipeline(const stages: array of TPipelineStageDelegateEx; const
-  input: IOmniBlockingCollection): IOmniPipeline;
+class function Parallel.Pipeline(const stages: array of TPipelineStageDelegateEx;
+  const input: IOmniBlockingCollection): IOmniPipeline;
 begin
   Result := Parallel.Pipeline;
   if assigned(input) then
@@ -2411,8 +2442,8 @@ begin
   Result.Stages(stages);
 end; { Parallel.Pipeline }
 
-class procedure Parallel.Start(const taskControl: IOmniTaskControl; const taskConfig:
-  IOmniTaskConfig);
+class procedure Parallel.Start(const taskControl: IOmniTaskControl;
+  const taskConfig: IOmniTaskConfig);
 var
   taskCfg: IOmniTaskConfigInternal;
 begin
@@ -2432,9 +2463,9 @@ begin
   Result := TOmniTaskConfig.Create;
 end; { Parallel.TaskConfig }
 
-class function Parallel.TimedTask: IOmniTimedTask;
+class function Parallel.TimedTask(const threadName: string): IOmniTimedTask;
 begin
-  Result := TOmniTimedTask.Create;
+  Result := TOmniTimedTask.Create(threadName);
 end; { Parallel.TimedTask }
 
 { TOmniParallelLoopBase }
@@ -2810,6 +2841,8 @@ begin
     FNumTasks := taskCount
   else
     FNumTasks := Environment.Process.Affinity.Count + taskCount;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
   FNumTasksManual := true;
 end; { TOmniParallelLoopBase.SetNumTasks }
 
@@ -3619,6 +3652,8 @@ begin
     FNumTasks := taskCount
   else
     FNumTasks := Environment.Process.Affinity.Count + taskCount;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
   FNumTasksManual := true;
   Result := Self;
 end; { TOmniParallelSimpleLoop.NumTasks }
@@ -4064,6 +4099,8 @@ begin
     opsNumTasks := value
   else
     opsNumTasks := Environment.Process.Affinity.Count + value;
+  if opsNumTasks <= 0 then
+    opsNumTasks := 1;
 end; { TOmniPipelineStage.SetNumTasks }
 
 procedure TOmniPipelineStage.SetQueues(const inQueue, outQueue: IOmniBlockingCollection);
@@ -4198,6 +4235,8 @@ begin
   Assert(numTasks <> 0);
   if numTasks < 0 then
     numTasks := Environment.Process.Affinity.Count + numTasks;
+  if numTasks <= 0 then
+    numTasks := 1;
 
   if opStages.Count = 0 then
     opNumTasks := numTasks
@@ -4444,7 +4483,7 @@ function TOmniCompute<T>.TryValue(timeout_ms: cardinal; var value: T): boolean;
 var
   compute: TOmniValue;
 begin
-  Result := false;
+//  Result := false;
   while not FComputed do begin
     if FInput.Take(compute) then
       IOmniCompute<T>(compute.AsInterface).Execute
@@ -4495,8 +4534,6 @@ begin
 end; { TOmniForkJoin }
 
 function TOmniForkJoin<T>.Compute(action: TOmniForkJoinDelegate<T>): IOmniCompute<T>;
-var
-  intf: IInterface;
 begin
   StartWorkerTasks;
   Result := TOmniCompute<T>.Create(action, FPoolInput);
@@ -4507,6 +4544,8 @@ constructor TOmniForkJoin<T>.Create;
 begin
   inherited Create;
   FNumTasks := Environment.Process.Affinity.Count - 1;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
 end; { TOmniForkJoin<T>.Create }
 
 function TOmniForkJoin<T>.NumTasks(numTasks: integer): IOmniForkJoin<T>;
@@ -4516,6 +4555,8 @@ begin
     FNumTasks := numTasks
   else
     FNumTasks := Environment.Process.Affinity.Count + numTasks;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
   Result := Self;
 end; { TOmniForkJoin<T>.NumTasks }
 
@@ -4572,6 +4613,8 @@ begin
   Assert(numTasks <> 0);
   if numTasks < 0 then
     numTasks := Environment.Process.Affinity.Count + numTasks;
+  if numTasks <= 0 then
+    numTasks := 1;
   FForkJoin.NumTasks(numTasks);
   Result := self;
 end; { TOmniForkJoin.NumTasks }
@@ -4600,6 +4643,12 @@ begin
     end);
 end; { TOmniParallelTask.Execute }
 
+function TOmniParallelTask.Cancel:IOmniParallelTask;
+begin
+  Result := self;
+  optJoin.Cancel;
+end; { TOmniParallelTask.Cancel }
+
 function TOmniParallelTask.DetachException: Exception;
 begin
   Result := optJoin.DetachException;
@@ -4624,12 +4673,17 @@ begin
   if not optNoWait then
     WaitFor(INFINITE);
   Result := Self;
-end;
+end; { TOmniParallelTask.Execute }
 
 function TOmniParallelTask.FatalException: Exception;
 begin
   Result := optJoin.FatalException;
 end; { TOmniParallelTask.FatalException }
+
+function TOmniParallelTask.IsCancelled: boolean;
+begin
+  Result := optJoin.IsCancelled;
+end; { TOmniParallelTask.IsCancelled }
 
 function TOmniParallelTask.IsExceptional: boolean;
 begin
@@ -4652,6 +4706,8 @@ begin
   Assert(numTasks <> 0);
   if numTasks < 0 then
     numTasks := Environment.Process.Affinity.Count + numTasks;
+  if numTasks <= 0 then
+    numTasks := 1;
   optJoin.NumTasks(numTasks);
   optNumTasks := numTasks;
   Result := Self;
@@ -4688,6 +4744,11 @@ begin
   optJoin.TaskConfig(config);
   Result := Self;
 end; { TOmniParallelTask.TaskConfig }
+
+function TOmniParallelTask.Terminate(timeout_ms: cardinal): boolean;
+begin
+  Result := optJoin.Terminate(timeout_ms);
+end; { TOmniParallelTask.Terminate }
 
 function TOmniParallelTask.WaitFor(timeout_ms: cardinal): boolean;
 begin
@@ -4974,6 +5035,8 @@ begin
     FNumTasks := numTasks
   else
     FNumTasks := Environment.Process.Affinity.Count + numTasks;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
   Result := Self;
 end; { TOmniBackgroundWorker.NumTasks }
 
@@ -5059,9 +5122,9 @@ begin
   Result := Self;
 end; { TOmniBackgroundWorker.TaskConfig }
 
-function TOmniBackgroundWorker.Terminate(maxWait_ms: cardinal): boolean;
+function TOmniBackgroundWorker.Terminate(timeout_ms: cardinal): boolean;
 begin
-  Result := WaitFor(maxWait_ms);
+  Result := WaitFor(timeout_ms);
   {$IFDEF MSWINDOWS}
   if Result then begin
     if assigned(FObserver) then begin
@@ -5073,12 +5136,12 @@ begin
   {$ENDIF MSWINDOWS}
 end; { TOmniBackgroundWorker.Terminate }
 
-function TOmniBackgroundWorker.WaitFor(maxWait_ms: cardinal): boolean;
+function TOmniBackgroundWorker.WaitFor(timeout_ms: cardinal): boolean;
 begin
   Result := true;
   if assigned(FWorker) then begin
     FWorker.Input.CompleteAdding;
-    Result := FWorker.WaitFor(maxWait_ms);
+    Result := FWorker.WaitFor(timeout_ms);
   end;
 end; { TOmniBackgroundWorker.WaitFor }
 
@@ -5322,9 +5385,7 @@ end; { TOmniParallelMapper }
 function TOmniParallelMapper<T1,T2>.Execute(
   mapper: TMapProc<T1,T2>): IOmniParallelMapper<T1,T2>;
 var
-  dest: T2;
-  el  : T1;
-  i   : integer;
+  i: integer;
 begin
   SetLength(FTarget, Length(FSource));
   SetLength(FTargetData, FNumTasks);
@@ -5382,6 +5443,8 @@ begin
     FNumTasks := numTasks
   else
     FNumTasks := Environment.Process.Affinity.Count + numTasks;
+  if FNumTasks <= 0 then
+    FNumTasks := 1;
   Result := Self;
 end; { TOmniParallelMapper<T1,T2> }
 
@@ -5490,10 +5553,10 @@ end; { TOmniTimedTaskWorker.TaskInterval }
 
 { TOmniTimedTask }
 
-constructor TOmniTimedTask.Create;
+constructor TOmniTimedTask.Create(const threadName: string);
 begin
-  inherited;
-  FWorker := CreateTask(TOmniTimedTaskWorker.Create(), 'Timed task').Unobserved.Run;
+  inherited Create;
+  FWorker := CreateTask(TOmniTimedTaskWorker.Create(), IFF(threadName <> '', threadName, 'Timed task')).Unobserved.Run;
 end; { TOmniTimedTask.Create }
 
 destructor TOmniTimedTask.Destroy;
@@ -5575,14 +5638,14 @@ begin
   Result := Self;
 end; { TOmniTimedTask.TaskConfig }
 
-function TOmniTimedTask.Terminate(maxWait_ms: cardinal): boolean;
+function TOmniTimedTask.Terminate(timeout_ms: cardinal): boolean;
 begin
-  Result := FWorker.Terminate(maxWait_ms);
+  Result := FWorker.Terminate(timeout_ms);
 end; { TOmniTimedTask.Terminate }
 
-function TOmniTimedTask.WaitFor(maxWait_ms: cardinal): boolean;
+function TOmniTimedTask.WaitFor(timeout_ms: cardinal): boolean;
 begin
-  Result := FWorker.WaitFor(maxWait_ms);
+  Result := FWorker.WaitFor(timeout_ms);
 end; { TOmniTimedTask.WaitFor }
 
 initialization

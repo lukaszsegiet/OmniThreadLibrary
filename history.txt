@@ -1,8 +1,31 @@
-3.07.8: <<unreleased>>
+3.07.9: 2021-10-25
+
+- New features:
+  - New unit OtlSync.Utils. Requires Delphi 2009 or newer.
+  - TOmniTaskControl.OnMessage and .OnTerminated free the executor
+    if the eventHandler is nil.
+  - [HHasenack] Added IOmniTaskControl.DirectExecute which executes task in the
+    current thread.
+  - [HHasenack] Added Cancel and IsCancelled to IOmniParallelTask.
+  - Implemented IOmniParallelJoin.Terminate and IOmniParallelTask.Terminate.
+  - Added optional timeout parameter to IOmniThreadPool.Cancel.
+  - Added Delphi 11 Alexandria packages.
+
+- Bug fixes:
+  - Fixed warnings in OtlComm.
+  - Fixed link to support forum in all units.
+  - Fixed TOmniMREW.TryEnterWriteLock [issue #149].
+  - Fixed: Calling TOmniWaitObjectList.Remove removed only
+    the ResponseHandlers[] handler and not the AnonResponseHandlers[] handler.
+  - Fixed: IOmniIntegerSet/TOmniIntegerSet.AsMask changed to uint64 so it can store
+    64-bit NativeUInt without problems. [issue #148]
+
+3.07.8: 2020-05-30
 
 - New features:
   - Implemented IOmniTask.RegisterWaitObject with an anonymous method callback.
   - [Jacek Laskowski] donated a new OTL icon (res\OTL.ico).
+  - Added Delphi 10.4 Sydney packages.
   
 - Bug fixes:
   - [sglienke] A reference to an anonymous method executor in IOmniTask is
@@ -12,6 +35,7 @@
     on timeout.
   - SetOnMessage(nil) works correctly.
   - Fixed invalid FreeAndNil of an interface in TOmniFuture<T>.Execute.  
+  - Compiles with Delphi 10.4 Sydney.
 
 3.07.7: 2019-02-23
 

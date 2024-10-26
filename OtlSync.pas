@@ -4,7 +4,7 @@
 ///<license>
 ///This software is distributed under the BSD license.
 ///
-///Copyright (c) 2019, Primoz Gabrijelcic
+///Copyright (c) 2020, Primoz Gabrijelcic
 ///All rights reserved.
 ///
 ///Redistribution and use in source and binary forms, with or without modification,
@@ -30,18 +30,25 @@
 ///</license>
 ///<remarks><para>
 ///   Home              : http://www.omnithreadlibrary.com
-///   Support           : https://plus.google.com/communities/112307748950248514961
+///   Support           : https://en.delphipraxis.net/forum/32-omnithreadlibrary/
 ///   Author            : Primoz Gabrijelcic
 ///     E-Mail          : primoz@gabrijelcic.org
 ///     Blog            : http://thedelphigeek.com
 ///   Contributors      : GJ, Lee_Nover, dottor_jeckill, Sean B. Durkin, VyPu
 ///   Creation date     : 2009-03-30
-///   Last modification : 2019-03-19
-///   Version           : 1.27b
+///   Last modification : 2023-11-28
+///   Version           : 1.27d
 ///</para><para>
 ///   History:
+///     1.27d: 2023-11-28
+///       - Fixed hints & warnings.
+///       - Locked<T>.Initialize without the 'factory' parameter could return
+///         uninitialized value.
+///     1.27c: 2020-09-16
+///       - Fixed TOmniMREW.TryEnterWriteLock which incorrectly managed the shared lock
+///         state when a timeout occurred. [issue #149]
 ///     1.27b: 2019-03-19
-///        - TOmniMREW.TryEnterReadLock and .TryEnterWriteLock were returning True on timeout.
+///       - TOmniMREW.TryEnterReadLock and .TryEnterWriteLock were returning True on timeout.
 ///     1.27a: 2018-11-02
 ///       - Fixed race condition between TOmniResourceCount.[Try]Allocate and TOmniResourceCount.Release.
 ///	    1.27: 2018-04-06
@@ -1304,7 +1311,8 @@ begin
   until CAS(currentReference, currentReference + 2, NativeInt(omrewReference))
         or Timeout(Result);
   {$ELSE}
-  until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 2, currentReference) = currentReference) or Timeout(Result);
+  until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 2, currentReference) = currentReference)
+        or Timeout(Result);
   {$ENDIF}
 end; { TOmniMREW.TryEnterReadLock }
 
@@ -1331,14 +1339,23 @@ begin
   until CAS(currentReference,  currentReference + 1, NativeInt(omrewReference))
         or Timeout(Result);
   {$ELSE}
-  until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 1, currentReference) = currentReference) or Timeout(Result);
+  until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference + 1, currentReference) = currentReference)
+        or Timeout(Result);
   {$ENDIF}
+
   if Result then begin
     //Now wait on all readers
     repeat
     until (NativeInt(omrewReference) = 1) or Timeout(Result);
     if not Result then
-      ExitWriteLock;
+      //Clear the write flag
+      repeat
+        currentReference := NativeInt(omrewReference);
+      {$IFDEF MSWINDOWS}
+      until CAS(currentReference,  currentReference AND NOT 1, NativeInt(omrewReference))
+      {$ELSE}
+      until (TInterlockedEx.CompareExchange(NativeInt(omrewReference), currentReference AND NOT 1, currentReference) = currentReference) or Timeout(Result);
+      {$ENDIF}
   end;
 end; { TOmniMREW.TryEnterWriteLock }
 
@@ -1506,7 +1523,9 @@ end; { Atomic<T>.Initialize }
 {$IFDEF OTL_ERTTI}
 class function Atomic<T>.Initialize(var storage: T): T;
 begin
-  if not assigned(PPointer(@storage)^) then begin
+  if assigned(PPointer(@storage)^) then
+    Result := storage
+  else begin
     if PTypeInfo(TypeInfo(T))^.Kind  <> tkClass then
       raise Exception.Create('Atomic<T>.Initialize: Unsupported type');
     Result := Atomic<T>.Initialize(storage,
@@ -1518,6 +1537,7 @@ begin
         resValue    : TValue;
         rType       : TRttiType;
       begin
+        Result := Default(T);
         ctx := TRttiContext.Create;
         rType := ctx.GetType(TypeInfo(T));
         for aMethCreate in rType.GetMethods do begin
@@ -1626,7 +1646,9 @@ end; { Locked<T>.Initialize }
 {$IFDEF OTL_ERTTI}
 function Locked<T>.Initialize: T;
 begin
-  if not FInitialized then begin
+  if FInitialized then
+    Result := FValue
+  else begin
     if PTypeInfo(TypeInfo(T))^.Kind  <> tkClass then
       raise Exception.Create('Locked<T>.Initialize: Unsupported type');
     Result := Initialize(
@@ -1639,6 +1661,7 @@ begin
         resValue    : TValue;
         rType       : TRttiType;
       begin
+        Result := Default(T);
         ctx := TRttiContext.Create;
         rType := ctx.GetType(TypeInfo(T));
         for aMethCreate in rType.GetMethods do begin
@@ -1759,7 +1782,6 @@ end; { TOmniLockManager }
 function TOmniLockManager<K>.Lock(const key: K; timeout_ms: cardinal): boolean;
 var
   lockData  : TLockValue;
-  lockThread: integer;
   notifyItem: TGpDoublyLinkedListObject;
   startWait : int64;
   waitEvent : TDSiEventHandle;

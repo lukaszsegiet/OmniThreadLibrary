@@ -28,12 +28,10 @@ package OmniThreadLibraryRuntime;
 {$DESCRIPTION 'OmniThreadLibrary runtime'}
 {$LIBSUFFIX '250'}
 {$RUNONLY}
-{$IMPLICITBUILD ON}
+{$IMPLICITBUILD OFF}
 
 requires
-  rtl,
-  vclx,
-  vcl;
+  rtl;
 
 contains
   GpLists in '..\..\src\GpLists.pas',

@@ -8,10 +8,32 @@
                        Christian Wimmer, Tommi Prami, Miha, Craig Peterson, Tommaso Ercole,
                        bero.
    Creation date     : 2002-10-09
-   Last modification : 2020-04-03
-   Version           : 2.0
+   Last modification : 2023-07-21
+   Version           : 2.05
 </pre>*)(*
    History:
+     2.05: 2023-07-21
+       - DSiGetWindowsVersion recognizes Windows 11 and Windows Server 2022.
+     2.04a: 2023-02-02
+       - DSiKillRegistry requires more access to properly delete a registry branch.
+     2.04: 2022-09-29
+       - Correctly handle ERROR_NO_MORE_FILES error in DSiEnumFilesEx.
+     2.03: 2022-08-11
+       - Added optional parameter terminateTimeout to DSiExecuteAndCapture.
+     2.02a: 2022-04-27
+       - Compiles again with D2007.
+     2.02: 2022-01-31
+       - Added dynamically loaded API forwarder DSiEnumProcesses.
+     2.01a: 2021-10-26
+       - Fixed DSiUnregisterUserFileAssoc. (https://stackoverflow.com/a/67519966)
+     2.01: 2021-07-28
+       - Added two overloaded DSiEnumFilesEx versions that return (unexpected) errors -
+         one in a callback and another in parameters.
+     2.0b: 2021-03-02
+       - All unit names are fully scoped (when supported).
+     2.0a: 2021-02-05
+       - Read end of write pipe was passed to the child process as its input in
+         DSiExecuteAndCapture.
      2.0: 2020-04-03
        - Extracted all code depending on Vcl.Graphics into unit DSiWin32.VCL.
      1.108: 2020-04-03
@@ -1146,6 +1168,9 @@ type
     procedure(const folder: string; S: TSearchRec;
     isAFolder: boolean; var stopEnum: boolean)
     {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
+  TDSiEnumFilesExErrorCallback = {$IFDEF DSiHasAnonymousFunctions}reference to{$ENDIF}
+    procedure(const path: string; err: integer)
+    {$IFNDEF DSiHasAnonymousFunctions}of object{$ENDIF};
 
   // DSiExecuteAndCapture callback
   TDSiOnNewLineCallback = {$IFDEF DSiHasAnonymousFunctions}reference to{$ENDIF}
@@ -1214,7 +1239,7 @@ type
   function DSiDeleteRegistryValue(const registryKey, name: string; root: HKEY =
     HKEY_CURRENT_USER; access: longword = KEY_SET_VALUE): boolean;
   function DSiKillRegistry(const registryKey: string;
-    root: HKEY = HKEY_CURRENT_USER; access: longword = KEY_SET_VALUE): boolean;
+    root: HKEY = HKEY_CURRENT_USER; access: longword = KEY_QUERY_VALUE OR KEY_SET_VALUE OR KEY_ENUMERATE_SUB_KEYS): boolean;
   function DSiReadRegistry(const registryKey, name: string;
     defaultValue: Variant; root: HKEY = HKEY_CURRENT_USER;
     access: longword = KEY_QUERY_VALUE): Variant; overload;
@@ -1313,8 +1338,15 @@ type
     enumCallback: TDSiEnumFilesCallback): integer;
   function  DSiEnumFilesEx(const fileMask: string; attr: integer;
     enumSubfolders: boolean; enumCallback: TDSiEnumFilesExCallback;
-    maxEnumDepth: integer = 0;
-    ignoreDottedFolders: boolean = false): integer;
+    maxEnumDepth: integer = 0; ignoreDottedFolders: boolean = false): integer; overload;
+  function  DSiEnumFilesEx(const fileMask: string; attr: integer; enumSubfolders: boolean;
+    enumCallback: TDSiEnumFilesExCallback; errorCallback: TDSiEnumFilesExErrorCallback;
+    maxEnumDepth: integer = 0; ignoreDottedFolders: boolean = false): integer; overload;
+  {$IFDEF DSiHasAnonymousFunctions}
+  function  DSiEnumFilesEx(const fileMask: string; attr: integer; enumSubfolders: boolean;
+    enumCallback: TDSiEnumFilesExCallback; var error: integer; var errorPath: string;
+    maxEnumDepth: integer = 0; ignoreDottedFolders: boolean = false): integer; overload;
+  {$ENDIF DSiHasAnonymousFunctions}
   procedure DSiEnumFilesToSL(const fileMask: string; attr: integer; fileList: TStrings;
     storeFullPath: boolean = false; enumSubfolders: boolean = false;
     maxEnumDepth: integer = 0;
@@ -1373,12 +1405,13 @@ type
     wait: boolean = false): cardinal; overload;
   function  DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
     visibility: integer = SW_SHOWDEFAULT; const workDir: string = '';
-    creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS): cardinal; overload;
+    creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS; stdIn: THandle = 0): cardinal; overload;
   function  DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
     var exitCode: longword; waitTimeout_sec: integer = 15;
     onNewLine: TDSiOnNewLineCallback = nil;
     creationFlags: DWORD = CREATE_NEW_CONSOLE or NORMAL_PRIORITY_CLASS;
-    const abortHandle: THandle = 0): cardinal;
+    const abortHandle: THandle = 0;
+    terminateTimeout: DWORD = INFINITE): cardinal;
   function  DSiExecuteAsAdmin(const path: string; const parameters: string = '';
     const directory: string = ''; parentWindow: THandle = 0;
     showWindow: integer = SW_NORMAL; wait: boolean = false): boolean;
@@ -1527,7 +1560,8 @@ type
     wvWin98SE, wvWinME, wvWin9x, wvWinNT3, wvWinNT4, wvWin2000, wvWinXP,
     wvWinNT, wvWinServer2003, wvWinVista, wvWinServer2008, wvWinServer2008OrVistaSP1,
     wvWin7, wvWinServer2008R2, wvWin7OrServer2008R2, wvWin8, wvWin81,
-    wvWinServer2012, wvWinServer2012R2, wvWin10, wvWinServer2016);
+    wvWinServer2012, wvWinServer2012R2, wvWin10, wvWinServer2016, wvWin11,
+    wvWinServer2022);
 
   TDSiUIElement = (ueMenu, ueMessage, ueWindowCaption, ueStatus);
 
@@ -1539,7 +1573,7 @@ const
     'Windows Vista', 'Windows Server 2008', 'Windows Server 2008 or Windows Vista SP1',
     'Windows 7', 'Windows Server 2008 R2', 'Windows 7 or Windows Server 2008 R2',
     'Windows 8', 'Windows 8.1', 'Windows Server 2012', 'Windows Server 2012 R2', 'Windows 10',
-    'Windows Server 2016');
+    'Windows Server 2016', 'Windows 11', 'Windows Server 2022');
 
   {$EXTERNALSYM VER_SUITE_BACKOFFICE}
   VER_SUITE_BACKOFFICE     = $00000004; // Microsoft BackOffice components are installed.
@@ -2116,6 +2150,8 @@ type
   function  DSiDestroyEnvironmentBlock(lpEnvironment: pointer): BOOL;
   function  DSiDwmEnableComposition(uCompositionAction: UINT): HRESULT; stdcall;
   function  DSiDwmIsCompositionEnabled(var pfEnabled: BOOL): HRESULT; stdcall;
+  function  DSiEnumProcesses(lpidProcess: PDWORD; cb: DWORD;
+    var lpcbNeeded: DWORD): BOOL; stdcall;
   function  DSiEnumProcessModules(hProcess: THandle; lphModule: PModule; cb: DWORD;
     var lpcbNeeded: DWORD): BOOL; stdcall;
   function  DSiGetLogicalProcessorInformation(
@@ -2200,14 +2236,14 @@ var
 implementation
 
 uses
-  Types,
-  ComObj,
-  ActiveX,
+  {$IFDEF DSiScopedUnitNames}System.Types{$ELSE}Types{$ENDIF},
+  {$IFDEF DSiScopedUnitNames}System.Win.ComObj{$ELSE}ComObj{$ENDIF},
+  {$IFDEF DSiScopedUnitNames}Winapi.ActiveX{$ELSE}ActiveX{$ENDIF},
   {$IFDEF CONDITIONALCOMPILATION}
-  Variants,
+  {$IFDEF DSiScopedUnitNames}System.Variants{$ELSE}Variants{$ENDIF},
   {$ENDIF}
-  TLHelp32,
-  MMSystem;
+  {$IFDEF DSiScopedUnitNames}Winapi.TLHelp32{$ELSE}TLHelp32{$ENDIF},
+  {$IFDEF DSiScopedUnitNames}Winapi.MMSystem{$ELSE}MMSystem{$ENDIF};
 
 const
   CAPISuffix = {$IFDEF Unicode}'W'{$ELSE}'A'{$ENDIF};
@@ -2282,6 +2318,8 @@ type
   TDestroyEnvironmentBlock = function(lpEnvironment: pointer): BOOL; stdcall;
   TDwmEnableComposition = function(uCompositionAction: UINT): HRESULT; stdcall;
   TDwmIsCompositionEnabled = function(var pfEnabled: BOOL): HRESULT; stdcall;
+  TEnumProcesses= function(lpidProcess: PDWORD; cb: DWORD;
+    var lpcbNeeded: DWORD): BOOL; stdcall;
   TEnumProcessModules = function(hProcess: THandle; lphModule: PModule; cb: DWORD;
     var lpcbNeeded: DWORD): BOOL; stdcall;
   TGetLongPathName = function(lpszShortPath, lpszLongPath: PChar;
@@ -2356,6 +2394,7 @@ const
   GDestroyEnvironmentBlock: TDestroyEnvironmentBlock = nil;
   GDwmEnableComposition: TDwmEnableComposition = nil;
   GDwmIsCompositionEnabled: TDwmIsCompositionEnabled = nil;
+  GEnumProcesses: TEnumProcesses = nil;
   GEnumProcessModules: TEnumProcessModules = nil;
   GGetLogicalProcessorInformation: TGetLogicalProcessorInformation = nil;
   GGetLogicalProcessorInformationEx: TGetLogicalProcessorInformationEx = nil;
@@ -2885,6 +2924,7 @@ type
     p        : PChar;
     valueLen : DWORD;
     valueType: DWORD;
+    idx      : DWORD;
   begin
     strings.Clear;
     SetLastError(RegQueryValueEx(CurrentKey, PChar(name), nil, @valueType, nil,
@@ -2896,14 +2936,27 @@ type
       raise ERegistryException.Create('String list expected.')
     else begin
       GetMem(buffer, valueLen);
+      idx := 0;
       try
         RegQueryValueEx(CurrentKey, PChar(name), nil, nil, PByte(buffer),
           @valueLen);
         p := buffer;
+        // 2023-09-27 new
+        if p^ <> #0 then
+        begin
+          repeat
+            strings.Add(p);
+            idx := idx + cardinal(LStrLen(p)*2) + 2;
+            Inc (p, LStrLen(p) + 1);
+          until idx >= valueLen;
+        end;
+        // before 2023-09-27
+        {
         while p^ <> #0 do begin
           strings.Add(p);
           Inc (p, LStrLen(p) + 1);
         end
+        }
       finally FreeMem(buffer); end
     end;
   end; { TDSiRegistry.ReadStrings }
@@ -3209,7 +3262,7 @@ type
   }
   procedure DSiUnregisterUserFileAssoc(const progID: string);
   begin
-    DSiKillRegistry('\Software\Classes\' + progID, HKEY_CURRENT_USER);
+    DSiKillRegistry('\Software\Classes\' + progID, HKEY_CURRENT_USER, KEY_ALL_ACCESS);
   end; { DSiUnregisterUserFileAssoc }
 
 { Files }
@@ -3613,9 +3666,11 @@ type
     finally FindClose(S); end;
   end; { DSiEnumFiles }
 
-  procedure _DSiEnumFilesEx(const folder, fileMask: string; attr: integer; enumSubfolders:
-    boolean; enumCallback: TDSiEnumFilesExCallback; var totalFiles: integer; var stopEnum:
-    boolean; fileList: TStrings; fileObjectList: TObjectList; storeFullPath: boolean;
+  procedure _DSiEnumFilesEx(const folder, fileMask: string; attr: integer;
+    enumSubfolders: boolean; enumCallback: TDSiEnumFilesExCallback;
+    errorCallback: TDSiEnumFilesExErrorCallback;
+    var totalFiles: integer; var stopEnum: boolean; fileList: TStrings;
+    fileObjectList: TObjectList; storeFullPath: boolean;
     currentDepth, maxDepth: integer; ignoreDottedFolders: boolean);
   var
     err: integer;
@@ -3623,7 +3678,11 @@ type
   begin
     if enumSubfolders and ((maxDepth <= 0) or (currentDepth < maxDepth)) then begin
       err := FindFirst(folder+'*.*', faDirectory or (attr and faHidden), S);
-      if err = 0 then try
+      if err <> 0 then begin
+        if (err <> ERROR_FILE_NOT_FOUND) and (err <> ERROR_NO_MORE_FILES) and assigned(errorCallback) then
+          errorCallback(folder, err);
+      end
+      else try
         repeat
           if (S.Attr and faDirectory) <> 0 then
             if (S.Name <> '.') and (S.Name <> '..') and
@@ -3646,17 +3705,23 @@ type
                   fileObjectList.Add(TDSiFileInfo.Create(folder, S, currentDepth));
               {$IFDEF DSiScopedUnitNames}end;{$ENDIF}
               _DSiEnumFilesEx(folder+S.Name+'\', fileMask, attr, enumSubfolders,
-                enumCallback, totalFiles, stopEnum, fileList, fileObjectList,
+                enumCallback, errorCallback, totalFiles, stopEnum, fileList, fileObjectList,
                 storeFullPath, currentDepth + 1, maxDepth, ignoreDottedFolders);
             end;
           err := FindNext(S);
+          if (err <> 0) and (err <> ERROR_NO_MORE_FILES) and assigned(errorCallback) then
+            errorCallback(folder + S.Name, err);
         until (err <> 0) or stopEnum;
       finally FindClose(S); end;
     end;
     if stopEnum then
       Exit;
-    err := FindFirst(folder+fileMask, attr, S);
-    if err = 0 then try
+    err := FindFirst(folder + fileMask, attr, S);
+    if err <> 0 then begin
+      if (err <> ERROR_FILE_NOT_FOUND) and (err <> ERROR_NO_MORE_FILES) and assigned(errorCallback) then
+        errorCallback(folder + fileMask, err);
+    end
+    else try
       repeat
         // don't filter anything
         //if (S.Attr AND attr <> 0) or (S.Attr AND attr = attr) then begin
@@ -3675,6 +3740,8 @@ type
           Inc(totalFiles);
         end;
         err := FindNext(S);
+        if (err <> 0) and (err <> ERROR_NO_MORE_FILES) and assigned(errorCallback) then
+          errorCallback(folder + S.Name, err);
       until (err <> 0) or stopEnum;
     finally FindClose(S); end;
   end; { _DSiEnumFilesEx }
@@ -3686,8 +3753,8 @@ type
     @since   2003-06-17
   }
   function DSiEnumFilesEx(const fileMask: string; attr: integer; enumSubfolders: boolean;
-    enumCallback: TDSiEnumFilesExCallback; maxEnumDepth: integer;
-    ignoreDottedFolders: boolean): integer;
+    enumCallback: TDSiEnumFilesExCallback; errorCallback: TDSiEnumFilesExErrorCallback;
+    maxEnumDepth: integer; ignoreDottedFolders: boolean): integer; overload;
   var
     folder  : string;
     mask    : string;
@@ -3700,9 +3767,46 @@ type
       folder := IncludeTrailingBackslash(folder);
     Result := 0;
     stopEnum := false;
-    _DSiEnumFilesEx(folder, mask, attr, enumSubfolders, enumCallback, Result, stopEnum,
+    _DSiEnumFilesEx(folder, mask, attr, enumSubfolders, enumCallback, errorCallback, Result, stopEnum,
       nil, nil, false, 1, maxEnumDepth, ignoreDottedFolders);
   end; { DSiEnumFilesEx }
+
+  function DSiEnumFilesEx(const fileMask: string; attr: integer;
+    enumSubfolders: boolean; enumCallback: TDSiEnumFilesExCallback;
+    maxEnumDepth: integer; ignoreDottedFolders: boolean): integer; overload;
+  var
+    nullErr: TDSiEnumFilesExErrorCallback;
+  begin
+    {$IFDEF DSiHasAnonymousFunctions}
+    nullErr := nil;
+    {$ELSE}
+    TMethod(nullErr).Code := nil;
+    TMethod(nullErr).Data := nil;
+    {$ENDIF DSiHasAnonymousFunctions};
+    Result := DSiEnumFilesEx(fileMask, attr, enumSubfolders, enumCallback, nullErr, maxEnumDepth, ignoreDottedFolders);
+  end; { DSiEnumFilesEx }
+
+{$IFDEF DSiHasAnonymousFunctions}
+  function DSiEnumFilesEx(const fileMask: string; attr: integer; enumSubfolders: boolean;
+    enumCallback: TDSiEnumFilesExCallback; var error: integer; var errorPath: string;
+    maxEnumDepth: integer; ignoreDottedFolders: boolean): integer; overload;
+  var
+    _error: integer;
+    _errorPath : string;
+  begin
+    _error := 0;
+    _errorPath := '';
+    Result := DSiEnumFilesEx(fileMask, attr, enumSubfolders, enumCallback,
+      procedure (const path: string; err: integer)
+      begin
+        _error := err;
+        _errorPath := path;
+      end,
+      maxEnumDepth, ignoreDottedFolders);
+    error := _error;
+    errorPath := _errorPath;
+  end; { DSiEnumFilesEx }
+{$ENDIF DSiHasAnonymousFunctions}
 
   {:Enumerates files (optionally in subfolders) and stores results into caller-provided
     TStrings object.
@@ -3724,7 +3828,7 @@ type
     if folder <> '' then
       folder := IncludeTrailingBackslash(folder);
     stopEnum := false;
-    _DSiEnumFilesEx(folder, mask, attr, enumSubfolders, nil, totalFiles, stopEnum,
+    _DSiEnumFilesEx(folder, mask, attr, enumSubfolders, nil, nil, totalFiles, stopEnum,
       fileList, nil, storeFullPath, 1, maxEnumDepth, ignoreDottedFolders);
   end; { DSiEnumFilesToSL }
 
@@ -3749,7 +3853,7 @@ type
     if folder <> '' then
       folder := IncludeTrailingBackslash(folder);
     stopEnum := false;
-    _DSiEnumFilesEx(folder, mask, attr, enumSubfolders, nil, totalFiles, stopEnum,
+    _DSiEnumFilesEx(folder, mask, attr, enumSubfolders, nil, nil, totalFiles, stopEnum,
       nil, fileList, true{ignored}, 1, maxEnumDepth, ignoreDottedFolders);
   end; { DSiEnumFilesToOL }
 
@@ -4745,7 +4849,7 @@ type
   end; { DSiExecute }
 
   function DSiExecute(const commandLine: string; var processInfo: TProcessInformation;
-    visibility: integer; const workDir: string; creationFlags: DWORD): cardinal;
+    visibility: integer; const workDir: string; creationFlags: DWORD; stdIn: THandle): cardinal;
   var
     startupInfo: TStartupInfo;
     tmpCmdLine : string;
@@ -4758,7 +4862,10 @@ type
     FillChar(startupInfo, SizeOf(startupInfo), #0);
     startupInfo.cb := SizeOf(startupInfo);
     startupInfo.dwFlags := STARTF_USESHOWWINDOW;
+    if stdIn > 0 then
+      startupInfo.dwFlags := startupInfo.dwFlags or STARTF_USESTDHANDLES;
     startupInfo.wShowWindow := visibility;
+    startupInfo.hStdInput := stdIn;
     tmpCmdLine := commandLine;
     {$IFDEF Unicode}UniqueString(tmpCmdLine);{$ENDIF Unicode}
     if not CreateProcess(nil, PChar(tmpCmdLine), nil, nil, false,
@@ -5058,7 +5165,7 @@ type
   }
   function DSiExecuteAndCapture(const app: string; output: TStrings; const workDir: string;
     var exitCode: longword; waitTimeout_sec: integer; onNewLine: TDSiOnNewLineCallback;
-    creationFlags: DWORD; const abortHandle: THandle): cardinal;
+    creationFlags: DWORD; const abortHandle: THandle; terminateTimeout: DWORD): cardinal;
   var
     endTime_ms         : int64;
     lineBuffer         : PAnsiChar;
@@ -5152,11 +5259,13 @@ type
     security.bInheritHandle := true;
     security.lpSecurityDescriptor := nil;
     if CreatePipe(readPipe, writePipe, @security, 0) then begin
+      if not SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0) then
+        RaiseLastOSError;
       buffer := AllocMem(SizeReadBuffer + 1);
       FillChar(Start,Sizeof(Start),#0);
       start.cb := SizeOf(start);
       start.hStdOutput := writePipe;
-      start.hStdInput := readPipe;
+      start.hStdInput := 0;
       start.hStdError := writePipe;
       start.dwFlags := STARTF_USESTDHANDLES + STARTF_USESHOWWINDOW;
       start.wShowWindow := SW_HIDE;
@@ -5225,13 +5334,13 @@ type
       begin
         exitCode := 1;
         if TerminateProcess(processInfo.hProcess, exitCode) then
-          WaitForSingleObject(processInfo.hProcess, INFINITE);
+          WaitForSingleObject(processInfo.hProcess, terminateTimeout);
       end
       else begin
         GetExitCodeProcess(processInfo.hProcess, exitCode);
         if exitCode = STILL_ACTIVE then
           if TerminateProcess(processInfo.hProcess, exitCode) then begin
-            WaitForSingleObject(processInfo.hProcess, INFINITE);
+            WaitForSingleObject(processInfo.hProcess, terminateTimeout);
             GetExitCodeProcess(processInfo.hProcess, exitCode);
           end;
       end;
@@ -5567,7 +5676,7 @@ type
     fsCreationTime: TFileTime;
     fsExitTime    : TFileTime;
     fsKernelTime  : TFileTime;
-    fsUserTime    : FileTime;
+    fsUserTime    : TFileTime;
   begin
     Result :=
       GetThreadTimes(thread, fsCreationTime, fsExitTime, fsKernelTime, fsUserTime) and
@@ -7405,10 +7514,18 @@ var
           10: begin
             versionInfoEx.dwOSVersionInfoSize := SizeOf(versionInfoEx);
             GetVersionEx(versionInfoExFake);
-            if versionInfoEx.wProductType = VER_NT_WORKSTATION then
-              Result := wvWin10
-            else
-              Result := wvWinServer2016;
+            if versionInfoEx.wProductType = VER_NT_WORKSTATION then begin
+              if versionInfoExFake.dwBuildNumber >= 22000 then // https://learn.microsoft.com/en-us/answers/questions/547050/win32-api-to-detect-windows-11
+                Result := wvWin11
+              else
+                Result := wvWin10
+            end
+            else begin
+              if versionInfoExFake.dwBuildNumber >= 22000 then // https://learn.microsoft.com/en-us/answers/questions/547050/win32-api-to-detect-windows-11
+                Result := wvWinServer2022
+              else
+                Result := wvWinServer2016;
+            end;
           end;
         end; //case versionInfo.dwMajorVersion
       end; //versionInfo.dwPlatformID
@@ -9011,6 +9128,19 @@ var
       Result := S_FALSE;
     end;
   end; { DSiDwmIsCompositionEnabled }
+
+  function DSiEnumProcesses(lpidProcess: PDWORD; cb: DWORD;
+    var lpcbNeeded: DWORD): BOOL; stdcall;
+  begin
+    if not assigned(GEnumProcesses) then
+      GEnumProcesses := DSiGetProcAddress('psapi.dll', 'EnumProcesses');
+    if assigned(GEnumProcesses) then
+      Result := GEnumProcesses(lpidProcess, cb, lpcbNeeded)
+    else begin
+      SetLastError(ERROR_NOT_SUPPORTED);
+      Result := false;
+    end;
+  end; { DSiEnumProcessModules }
 
   function DSiEnumProcessModules(hProcess: THandle; lphModule: PModule; cb: DWORD;
     var lpcbNeeded: DWORD): BOOL; stdcall;
